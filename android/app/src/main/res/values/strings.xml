@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">我是鱼人际</string>
+    <string name="title_activity_main">我是鱼人际</string>
+    <string name="package_name">com.fishcrm.app</string>
+    <string name="custom_url_scheme">com.fishcrm.app</string>
+    <string name="accessibility_service_label">我是鱼人际 · 抓屏</string>
+    <string name="accessibility_service_description">开启后，屏幕边缘会出现「🐟」悬浮球。轻点即可读取当前微信聊天 / 转账界面的可见文字，自动整理入 FishCRM，不会上传任何第三方服务器。</string>
+</resources>

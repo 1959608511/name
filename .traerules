@@ -1,0 +1,29 @@
+# FishCRM 架构宪章（最高铁律）
+
+> 本项目是对标《我是鱼》的人际关系管理软件（FishCRM）。任何 AI / 开发者在本仓库中的每一轮开发都必须遵守本宪章，违反即视为返工。
+
+## 一、产品定位
+
+- 产品名：FishCRM（人际关系管理）。
+- 技术栈：Vue 3 + TypeScript + Vite + TailwindCSS + Pinia + ECharts + Lucide 图标（lucide-vue-next）。
+
+## 二、数据层铁律（严禁违反）
+
+1. 底部 7 大功能模块（通讯录 `contacts`、想法 `ideas`、礼物 `gifts`、记账 `ledger`、技能 `skills`、不来往人物 `cutoff`、不在世人物 `deceased`）在数据库层**必须严格共用 3 张表**：
+   - `persons`（人物表，`Person.status` 区分 active / cutoff / deceased）
+   - `records`（流水表，`CrmRecord.type` 区分 idea / gift / ledger）
+   - `relations`（关系表，`RelationEdge`）
+2. **严禁**为 7 个模块分别创建独立页面级数据源或独立数据表；模块只是同一组数据的不同筛选视图。
+3. 全局类型契约锁定在 `src/types/schema.ts`，任何修改必须同步检查所有引用方。
+4. 所有组件**严禁直接读写存储**（localStorage / IndexedDB 等），必须通过 `src/store/useCrmStore.ts` 调用 `src/services/dbService.ts`。组件内出现 `localStorage` 关键字即为违规。
+
+## 三、UI 层铁律
+
+1. 7 大模块在 UI 层**必须共用同一个通用抽屉组件** `src/components/UnifiedDrawer.vue`（Phase 2 创建），严禁为各模块复制粘贴独立的抽屉 / 表单组件。
+2. 底部导航 7 个入口仅是 `ModuleKey` 的切换，渲染差异通过配置驱动，而非 7 套独立页面。
+
+## 四、流程铁律
+
+1. 每次完成阶段任务必须执行 `npx vue-tsc --noEmit`，确保 **0 类型错误**后才算完成。
+2. 每次完成阶段任务必须**原地覆盖更新** `STATE.md`，勾选对应阶段复选框并记录日期。
+3. 不创建与当前阶段无关的文件；不引入未在本宪章声明的新依赖。
