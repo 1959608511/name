@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = 'Continue'
+﻿﻿$ErrorActionPreference = 'Continue'
 Set-Location -LiteralPath $PSScriptRoot
 
 function Write-Step([string]$Text) { Write-Host $Text -ForegroundColor Cyan }
