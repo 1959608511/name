@@ -6,7 +6,7 @@ function Write-Warn2([string]$Text) { Write-Host $Text -ForegroundColor Yellow }
 function Write-Err2([string]$Text) { Write-Host $Text -ForegroundColor Red }
 
 Write-Host "============================================"
-Write-Host "  FishCRM 一键上传 GitHub 工具"
+Write-Host "  name 一键上传 GitHub 工具"
 Write-Host "============================================"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -47,43 +47,16 @@ if (-not $gitUser) {
 
 git rm -r --cached node_modules .jdk dist android/.gradle android/app/build 2>$null | Out-Null
 
-function Get-NormalizedRepoUrl([string]$value) {
-    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
-    $clean = $value.Trim()
-    $clean = $clean.Trim([char[]]@(96, 34, 39, 60, 62, 32))
-    if ($clean -match 'github\.com[:\/]+([^\/\s]+)\/([^\/\s]+)') {
-        $owner = $Matches[1]
-        $repo = $Matches[2] -replace '\.git$', ''
-        if ($owner -and $repo) { return "https://github.com/$owner/$repo.git" }
-    }
-    return $null
-}
+$TargetRepo = "https://github.com/1959608511/name.git"
 
 $currentUrl = (git remote get-url origin 2>$null)
-$remote = $null
-if ($currentUrl) {
-    $remote = Get-NormalizedRepoUrl $currentUrl
-    if ($remote) {
-        if ($remote -ne $currentUrl.Trim()) {
-            Write-Warn2 "[提示] 已自动修正仓库地址为：$remote"
-            git remote set-url origin $remote
-        }
-    } else {
-        Write-Warn2 "[提示] 当前绑定的地址无效：$currentUrl"
-    }
+if ($currentUrl -and $currentUrl.Trim() -ne $TargetRepo) {
+    Write-Warn2 "[提示] 仓库地址已切换为：$TargetRepo"
+    git remote set-url origin $TargetRepo
+} elseif (-not $currentUrl) {
+    git remote add origin $TargetRepo
 }
-
-if (-not $remote) {
-    $inputUrl = Read-Host "请粘贴 GitHub 仓库地址（例如 https://github.com/xxx/FishCRM.git）"
-    $remote = Get-NormalizedRepoUrl $inputUrl
-    if (-not $remote) {
-        Write-Err2 "[错误] 无法识别仓库地址。请不要粘贴网页里的文件链接（含 /blob/ 或 /tree/），"
-        Write-Err2 "        正确格式：https://github.com/用户名/仓库名.git"
-        exit 1
-    }
-    Write-Step "使用仓库地址：$remote"
-    if ($currentUrl) { git remote set-url origin $remote } else { git remote add origin $remote }
-}
+Write-Step "目标仓库：$TargetRepo"
 
 Write-Step "正在扫描并打包源码（已自动过滤 node_modules 与 .jdk）..."
 git add -A | Out-Null
@@ -92,7 +65,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 git branch -M main
-git commit -m "backup: FishCRM 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Host
+git commit -m "backup: name 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Host
 
 Write-Step "正在上传到 GitHub（若弹出登录窗口请完成授权）..."
 git push -u origin main | Out-Host
