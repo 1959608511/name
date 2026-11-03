@@ -68,8 +68,17 @@ git branch -M main
 git commit -m "backup: name 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Host
 
 Write-Step "正在上传到 GitHub（若弹出登录窗口请完成授权）..."
-git push -u origin main | Out-Host
-$pushOk = ($LASTEXITCODE -eq 0)
+
+$pushOk = $false
+$maxAttempts = 3
+for ($i = 1; $i -le $maxAttempts -and -not $pushOk; $i++) {
+    git push -u origin main | Out-Host
+    $pushOk = ($LASTEXITCODE -eq 0)
+    if (-not $pushOk -and $i -lt $maxAttempts) {
+        Write-Warn2 "[提示] 第 $i 次推送失败（可能是网络波动），5 秒后自动重试 ..."
+        Start-Sleep -Seconds 5
+    }
+}
 
 if (-not $pushOk) {
     Write-Warn2 "[提示] 直接推送失败，尝试合并远端已有内容后重试 ..."
@@ -89,16 +98,68 @@ if (-not $pushOk) {
     }
 }
 
-if ($pushOk) {
+if (-not $pushOk) {
     Write-Host ""
-    Write-Host "[完成] 已成功上传到 GitHub" -ForegroundColor Green
+    Write-Err2 "[失败] 上传未完成，常见原因："
+    Write-Host "  1. 未登录 GitHub 或授权被取消"
+    Write-Host "  2. 仓库地址错误，或该账号没有写入权限"
+    Write-Host "  3. 远端存在冲突内容，需要先手动执行 git pull"
+    Write-Host "请把上方报错信息发给开发者。"
+    exit 1
+}
+
+# ---------- 上传完整性校验 ----------
+Write-Host ""
+Write-Step "正在校验远端内容，确认所有文件已完整上传 ..."
+
+$localHash = (git rev-parse HEAD).Trim()
+
+$remoteInfo = git ls-remote origin main 2>$null
+if (-not $remoteInfo) {
+    Write-Err2 "[校验失败] 无法连接远端仓库进行校验，请检查网络后重新运行本脚本。"
+    exit 1
+}
+$remoteHash = ($remoteInfo -split '\s+')[0].Trim()
+
+if ($remoteHash -ne $localHash) {
+    Write-Err2 "[校验失败] 远端最新提交与本地不一致！"
+    Write-Host "  本地提交: $localHash"
+    Write-Host "  远端提交: $remoteHash"
+    Write-Host "可能存在网络波动导致上传不完整，请重新运行本脚本。"
+    exit 1
+}
+
+# 提交哈希一致后，再逐文件比对文件清单（双保险）
+git fetch origin main --quiet 2>$null
+$localFiles  = @(git ls-files)
+$remoteFiles = @(git ls-tree -r origin/main --name-only)
+
+$missing = @($localFiles | Where-Object { $remoteFiles -notcontains $_ })
+$extra   = @($remoteFiles | Where-Object { $localFiles -notcontains $_ })
+
+Write-Host "--------------------------------------------"
+Write-Host "  校验结果"
+Write-Host "--------------------------------------------"
+Write-Host "  本地提交哈希: $localHash"
+Write-Host "  远端提交哈希: $remoteHash"
+Write-Host "  本地文件数量: $($localFiles.Count)"
+Write-Host "  远端文件数量: $($remoteFiles.Count)"
+
+if ($missing.Count -eq 0 -and $extra.Count -eq 0) {
+    Write-Host "  文件清单比对: 完全一致" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "[完成] 校验通过，$($localFiles.Count) 个文件已全部成功上传到 GitHub。" -ForegroundColor Green
     exit 0
 }
 
-Write-Host ""
-Write-Err2 "[失败] 上传未完成，常见原因："
-Write-Host "  1. 未登录 GitHub 或授权被取消"
-Write-Host "  2. 仓库地址错误，或该账号没有写入权限"
-Write-Host "  3. 远端存在冲突内容，需要先手动执行 git pull"
-Write-Host "请把上方报错信息发给开发者。"
+Write-Err2 "[校验失败] 本地与远端文件清单不一致！"
+if ($missing.Count -gt 0) {
+    Write-Host "  远端缺失 $($missing.Count) 个文件，例如："
+    $missing | Select-Object -First 10 | ForEach-Object { Write-Host "    - $_" }
+}
+if ($extra.Count -gt 0) {
+    Write-Host "  远端多出 $($extra.Count) 个文件，例如："
+    $extra | Select-Object -First 10 | ForEach-Object { Write-Host "    - $_" }
+}
+Write-Host "可能是网络波动导致上传不完整，请重新运行本脚本。"
 exit 1
