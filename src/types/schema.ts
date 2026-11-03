@@ -1,109 +1,134 @@
 /**
- * FishCRM 全局类型契约（锁死，修改前必须检查所有引用方）
- *
- * 数据层只有 3 张表：persons / records / relations。
- * 7 大模块（ModuleKey）只是这 3 张表的不同筛选视图。
+ * FishCRM v2.0 全局类型契约（唯一事实来源，严禁 any）
  */
 
-/** 底部 7 大功能模块 */
-export type ModuleKey =
-  | 'contacts'
-  | 'ideas'
-  | 'gifts'
-  | 'ledger'
-  | 'skills'
-  | 'cutoff'
-  | 'deceased'
+/** ISO 日期字符串，格式 'YYYY-MM-DD' */
+export type ISODate = string;
 
-/** 人物状态：active=通讯录，cutoff=不来往人物，deceased=不在世人物 */
-export type PersonStatus = 'active' | 'cutoff' | 'deceased'
-
-/** 流水类型：idea=想法，gift=礼物，ledger=记账 */
-export type RecordType = 'idea' | 'gift' | 'ledger'
-
-/** 记录来源：manual=手动录入，accessibility_ai=无障碍 AI 识别 */
-export type RecordSource = 'manual' | 'accessibility_ai'
-
-/** 人物表 persons */
-export interface Person {
-  id: string
-  name: string
-  /** 别名 / 昵称列表（AI 匹配人物时同时匹配 name 与 aliases） */
-  aliases: string[]
-  status: PersonStatus
-  /** 技能标签（供 skills 模块聚合） */
-  skills: string[]
-  /** 自由标签（如 家人 / 同事 / 朋友） */
-  tags: string[]
-  phone?: string
-  /** 生日，格式 YYYY-MM-DD */
-  birthday?: string
-  note?: string
-  /** 创建时间戳（毫秒） */
-  createdAt: number
+/** 人情往来记录（红包 / 礼物 / 请客等） */
+export interface FavorRecord {
+  id: string;
+  date: ISODate;
+  title: string;
+  amount: number;
+  direction: 'in' | 'out';
+  note: string;
+  /** 人情往来标签（如 婚礼/生日/乔迁） */
+  tag?: string;
 }
 
-/** 流水表 records
- * 金额约定：amount > 0 表示收入 / 收到；amount < 0 表示支出 / 送出；idea 通常为 0。
- */
-export interface CrmRecord {
-  id: string
-  personId: string
-  /** 冗余存人物名，便于列表渲染与 CSV 导出 */
-  personName: string
-  type: RecordType
-  amount: number
-  /** 条目名（礼物名 / 收支项 / 想法标题） */
-  itemTitle: string
-  /** 原始内容（手动备注或 AI 识别的原文） */
-  rawContent: string
-  /** 事件日期，格式 YYYY-MM-DD */
-  eventDate: string
-  source: RecordSource
-  createdAt: number
+/** 通讯录联系人 */
+export interface ContactPerson {
+  id: string;
+  name: string;
+  aliases: string[];
+  phone: string;
+  birthday: string;
+  tags: string[];
+  favors: FavorRecord[];
+  note: string;
+  createdAt: number;
+  /** 建档归属的日历日期（用于工作台"新增联系人"展示） */
+  createdDate?: ISODate;
 }
 
-/** 关系表 relations（有向边，UI 层可按无向渲染） */
+/** 记账类别：支出 | 收入 | 其他（专用于借钱/还钱往来） */
+export type LedgerCategory = 'expense' | 'income' | 'other';
+
+/** 记账小模块展示范围：当日 | 全部 | 借还 */
+export type LedgerScope = 'day' | 'all' | 'loan';
+
+/** 借还账目的单笔部分还款记录 */
+export interface LedgerRepayment {
+  id: string;
+  date: ISODate;
+  amount: number;
+  createdAt: number;
+}
+
+/** 记账条目（amount 统一存正数绝对值，方向由 category 表达） */
+export interface LedgerItem {
+  id: string;
+  date: ISODate;
+  category: LedgerCategory;
+  amount: number;
+  contactId?: string;
+  contactName?: string;
+  remark: string;
+  tempNote?: string;
+  createdAt: number;
+  /** 借还账目：是否全部已还 */
+  isSettled?: boolean;
+  /** 借还账目：是否标记为危险（置顶警示） */
+  isDanger?: boolean;
+  /** 借还账目：部分还款追加记录 */
+  repayments?: LedgerRepayment[];
+}
+
+/** 日记 */
+export interface DiaryItem {
+  id: string;
+  date: ISODate;
+  content: string;
+  createdAt: number;
+}
+
+/** 待办（可通过 diaryId 内嵌于日记，与独立待办列表双向同步） */
+export interface TodoItem {
+  id: string;
+  date: ISODate;
+  text: string;
+  done: boolean;
+  /** 重要待办：未完成前跨日常驻置顶 */
+  isImportant?: boolean;
+  /** 可选提醒时间，格式 'HH:mm' */
+  time?: string;
+  diaryId?: string;
+  createdAt: number;
+}
+
+/** 关系图谱边 */
 export interface RelationEdge {
-  id: string
-  sourcePersonId: string
-  targetPersonId: string
-  /** 关系标签，如 夫妻 / 同事 / 球友 */
-  relationLabel: string
-  /** 亲密度权重 1~5 */
-  weight: number
+  id: string;
+  sourceId: string;
+  targetId: string;
+  label: string;
+  weight: number;
 }
 
-/** 日历某一天的聚合摘要 */
-export interface CalendarDaySummary {
-  /** 日期，格式 YYYY-MM-DD */
-  date: string
-  totalEvents: number
-  /** 当天净收支（所有流水 amount 之和） */
-  netAmount: number
-  records: CrmRecord[]
+/** 日历单格缩略胶囊 */
+export interface DayCapsule {
+  text: string;
+  tone: 'expense' | 'income' | 'todo' | 'diary' | 'favor';
 }
 
-/** AI 识别结果（无障碍抓取文本 → 结构化） */
-export interface AiParsedResult {
-  /** 是否值得落库；false 时仅可用于预填，不产生任何写入 */
-  shouldRecord: boolean
-  /** 识别到的人物名（可为别名） */
-  personName: string
-  /** 识别到的人物状态（新建人物时使用，缺省视为 active） */
-  personStatus?: PersonStatus
-  /** 识别到的新技能标签（追加到人物 skills，自动去重） */
-  newSkills?: string[]
-  /** 识别到的流水 */
-  record?: {
-    type: RecordType
-    amount: number
-    itemTitle: string
-    eventDate: string
-  }
-  /** 识别到的人物关系线索 */
-  relationHint?: {
-    targetPersonName: string
-    relationLabel: string
-  }
+/** 日历单格聚合字典项 */
+export interface DaySummary {
+  date: ISODate;
+  undoneTodosCount: number;
+  netAmount: number;
+  hasDiary: boolean;
+  /** 全屏态单格纵向缩略信息（记账/待办/日记/人情） */
+  capsules: DayCapsule[];
+}
+
+/** 当前激活的底部面板类型 */
+export type PanelType = 'none' | 'choose' | 'todo' | 'contact' | 'ledger' | 'diary' | 'favor';
+
+/** v2.0 数据库整包结构（JSON 导入导出单元） */
+export interface V2Database {
+  contacts: ContactPerson[];
+  ledger: LedgerItem[];
+  diaries: DiaryItem[];
+  todos: TodoItem[];
+  relations: RelationEdge[];
+}
+
+/** AI 解析结果（自然语言 / 抓屏文本统一入口） */
+export interface AiParsedEntry {
+  kind: 'ledger' | 'todo' | 'diary';
+  date: ISODate;
+  category?: LedgerCategory;
+  amount?: number;
+  text: string;
 }

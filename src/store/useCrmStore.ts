@@ -1,156 +1,280 @@
 /**
- * FishCRM 全局状态库（组件唯一数据入口）
- *
- * 铁律：组件严禁直接读写存储，必须经由本 store 调用 dbService。
+ * FishCRM v2.0 Pinia 唯一响应式数据中心
+ * 所有组件只能通过本 store 读写数据，严禁直接触碰存储层。
  */
-import { computed, ref } from 'vue'
-import { defineStore } from 'pinia'
-import { dbService } from '@/services/dbService'
-import type { PersonFilter, RecordFilter, AiApplyOutcome, GraphData } from '@/services/dbService'
+import { computed, ref } from 'vue';
+import { defineStore } from 'pinia';
 import type {
-  AiParsedResult,
-  CalendarDaySummary,
-  CrmRecord,
-  Person,
-  RecordSource,
+  ContactPerson,
+  DaySummary,
+  DiaryItem,
+  FavorRecord,
+  ISODate,
+  LedgerItem,
+  LedgerRepayment,
+  LedgerScope,
+  PanelType,
   RelationEdge,
-} from '@/types/schema'
+  TodoItem,
+} from '../types/schema';
+import * as db from '../services/dbService';
+import { defaultLayout, loadLayout, saveLayout, type WidgetKey } from '../services/db/layout';
 
-export const useCrmStore = defineStore('crm', () => {
-  // ---------- 响应式状态 ----------
-  const initialized = ref(false)
-  const persons = ref<Person[]>([])
-  const records = ref<CrmRecord[]>([])
-  const relations = ref<RelationEdge[]>([])
+export const useCrmStore = defineStore('fishcrm-v2', () => {
+  /* ---------- 数据状态 ---------- */
+  const contacts = ref<ContactPerson[]>([]);
+  const ledger = ref<LedgerItem[]>([]);
+  const diaries = ref<DiaryItem[]>([]);
+  const todos = ref<TodoItem[]>([]);
+  const relations = ref<RelationEdge[]>([]);
 
-  // ---------- 派生状态 ----------
-  const activePersons = computed(() => persons.value.filter((p) => p.status === 'active'))
-  const cutoffPersons = computed(() => persons.value.filter((p) => p.status === 'cutoff'))
-  const deceasedPersons = computed(() => persons.value.filter((p) => p.status === 'deceased'))
-  const giftRecords = computed(() => records.value.filter((r) => r.type === 'gift'))
-  const ledgerRecords = computed(() => records.value.filter((r) => r.type === 'ledger'))
-  const ideaRecords = computed(() => records.value.filter((r) => r.type === 'idea'))
+  /* ---------- UI 状态 ---------- */
+  const selectedDate = ref<ISODate>(db.todayStr());
+  const activePanel = ref<PanelType>('none');
+  /** 当前面板正在编辑的条目 id（undefined = 新建） */
+  const editingId = ref<string | undefined>(undefined);
+  /** 通讯录小模块展示范围：当日 / 全部 */
+  const contactScope = ref<'day' | 'all'>('day');
+  /** 记账小模块展示范围：当日 / 全部 / 借还 */
+  const ledgerScope = ref<LedgerScope>('day');
+  /** 日记·待办小模块展示范围：当日 / 全部 */
+  const diaryScope = ref<'day' | 'all'>('day');
+  /** 人情往来编辑上下文（contactId + favorId，区别于通用 editingId） */
+  const favorEdit = ref<{ contactId?: string; favorId?: string } | null>(null);
+  /** 工作台小模块布局：排列顺序 + 各模块固定像素高度（fishcrm_v2_layout） */
+  const layoutOrder = ref<WidgetKey[]>(defaultLayout().order);
+  const layoutHeights = ref<Record<WidgetKey, number>>(defaultLayout().heights);
 
-  // ---------- 内部方法 ----------
-  function refreshAll(): void {
-    persons.value = dbService.getPersonsByFilter({})
-    records.value = dbService.getRecordsByFilter({})
-    relations.value = dbService.getGraphData().edges
+  function loadAll(): void {
+    const data = db.loadAll();
+    contacts.value = data.contacts;
+    ledger.value = data.ledger;
+    diaries.value = data.diaries;
+    todos.value = data.todos;
+    relations.value = data.relations;
   }
 
-  // ---------- 生命周期 ----------
-  function init(): void {
-    dbService.init()
-    refreshAll()
-    initialized.value = true
+  /* ---------- 工作台布局 ---------- */
+  function loadLayoutState(): void {
+    const l = loadLayout();
+    layoutOrder.value = l.order;
+    layoutHeights.value = l.heights;
+  }
+  /** 保存本次布局编辑结果（排序 + 高度）并持久化 */
+  function applyLayout(order: WidgetKey[], heights: Record<WidgetKey, number>): void {
+    const saved = saveLayout({ order, heights });
+    layoutOrder.value = saved.order;
+    layoutHeights.value = saved.heights;
   }
 
-  // ---------- 人物操作 ----------
-  function getPersonsByFilter(filter: PersonFilter): Person[] {
-    return dbService.getPersonsByFilter(filter)
+  /* ---------- 日历与面板 ---------- */
+  function selectDate(date: ISODate): void {
+    selectedDate.value = date;
+    // 点击日历任意日期自动退出「全部」模式，三个模块统一切回当日视图
+    contactScope.value = 'day';
+    ledgerScope.value = 'day';
+    diaryScope.value = 'day';
+  }
+  function setContactScope(s: 'day' | 'all'): void {
+    contactScope.value = s;
+  }
+  function setLedgerScope(s: LedgerScope): void {
+    ledgerScope.value = s;
+  }
+  function setDiaryScope(s: 'day' | 'all'): void {
+    diaryScope.value = s;
+  }
+  function openPanel(p: Exclude<PanelType, 'none'>, editId?: string): void {
+    activePanel.value = p;
+    editingId.value = editId;
+  }
+  /** 打开人情往来面板：新建（无参）或编辑指定联系人的指定人情 */
+  function openFavorPanel(contactId?: string, favorId?: string): void {
+    activePanel.value = 'favor';
+    favorEdit.value = { contactId, favorId };
+  }
+  function closePanel(): void {
+    activePanel.value = 'none';
+    editingId.value = undefined;
+    favorEdit.value = null;
   }
 
-  function upsertPerson(person: Partial<Person> & { name: string }): Person {
-    const saved = dbService.upsertPerson(person)
-    refreshAll()
-    return saved
+  /* ---------- 通讯录 ---------- */
+  function upsertContact(c: ContactPerson): void {
+    contacts.value = db.upsertContact(c);
+  }
+  function removeContact(id: string): void {
+    contacts.value = db.removeContact(id);
   }
 
-  function deletePerson(id: string): void {
-    dbService.deletePerson(id)
-    refreshAll()
+  /* ---------- 人情往来（内嵌于联系人） ---------- */
+  function upsertFavor(contactId: string, favor: FavorRecord): void {
+    contacts.value = db.upsertFavor(contactId, favor);
+  }
+  function removeFavor(contactId: string, favorId: string): void {
+    contacts.value = db.removeFavor(contactId, favorId);
   }
 
-  // ---------- 流水操作 ----------
-  function getRecordsByFilter(filter: RecordFilter): CrmRecord[] {
-    return dbService.getRecordsByFilter(filter)
+  /* ---------- 记账 ---------- */
+  function upsertLedger(item: LedgerItem): void {
+    ledger.value = db.upsertLedger(item);
+  }
+  function removeLedger(id: string): void {
+    ledger.value = db.removeLedger(id);
+  }
+  /** 切换「危险」标记：置顶红色警示 */
+  function toggleLedgerDanger(id: string): void {
+    const item = ledger.value.find((l) => l.id === id);
+    if (!item) return;
+    upsertLedger({ ...item, isDanger: !item.isDanger });
+  }
+  /** 标记 / 撤销「全部已还」 */
+  function markLedgerSettled(id: string, settled = true): void {
+    const item = ledger.value.find((l) => l.id === id);
+    if (!item) return;
+    upsertLedger({ ...item, isSettled: settled });
+  }
+  /** 追加一笔部分还款；累计已还达到总额时自动标记为全部已还 */
+  function addLedgerRepayment(id: string, amount: number, date?: ISODate): void {
+    const item = ledger.value.find((l) => l.id === id);
+    if (!item || !Number.isFinite(amount) || amount <= 0) return;
+    const record: LedgerRepayment = {
+      id: db.uid(), date: date || selectedDate.value, amount: Math.abs(amount), createdAt: Date.now(),
+    };
+    const repayments = [...(item.repayments ?? []), record];
+    const paid = repayments.reduce((sum, r) => sum + r.amount, 0);
+    upsertLedger({ ...item, repayments, isSettled: paid >= item.amount ? true : item.isSettled });
   }
 
-  function addRecord(record: Omit<CrmRecord, 'id' | 'createdAt' | 'personName'> & { personName?: string }): CrmRecord {
-    const saved = dbService.addRecord(record)
-    refreshAll()
-    return saved
+  /* ---------- 日记 ---------- */
+  function upsertDiary(d: DiaryItem): void {
+    diaries.value = db.upsertDiary(d);
+  }
+  function removeDiary(id: string): void {
+    diaries.value = db.removeDiary(id);
+    // 日记删除后，其内嵌待办降级为独立待办（保留数据不丢失）
+    todos.value = todos.value.map((t) => (t.diaryId === id ? { ...t, diaryId: undefined } : t));
+    db.saveTodos(todos.value);
   }
 
-  function deleteRecord(id: string): void {
-    dbService.deleteRecord(id)
-    refreshAll()
+  /* ---------- 待办（日记内嵌 ↔ 独立列表双向同步：同一 todos 数据源） ---------- */
+  function upsertTodo(t: TodoItem): void {
+    todos.value = db.upsertTodo(t);
+  }
+  function createTodo(text: string, isImportant?: boolean, customDate?: ISODate, customTime?: string): void;
+  /** 兼容旧式「日期优先」调用（TodoSheet 仍按此顺序传参） */
+  function createTodo(date: ISODate, text: string, isImportant?: boolean): void;
+  function createTodo(a: string, b?: string | boolean, c?: string | boolean, d?: string): void {
+    const legacy = typeof b === 'string';
+    const text = legacy ? b : a;
+    const important = legacy ? (typeof c === 'boolean' ? c : false) : (typeof b === 'boolean' ? b : false);
+    const date = legacy ? a : (typeof c === 'string' && c ? c : selectedDate.value);
+    const time = legacy ? undefined : d;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    upsertTodo({
+      id: db.uid(), date, text: trimmed, done: false,
+      isImportant: important, time: time || undefined, createdAt: Date.now(),
+    });
+  }
+  /** 在日记内嵌处新增待办：默认归属日记日期，可传入自定义日期 / 时间 */
+  function addTodoForDiary(
+    diaryId: string, text: string, isImportant = false, customDate?: ISODate, customTime?: string,
+  ): void {
+    const diary = diaries.value.find((d) => d.id === diaryId);
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    upsertTodo({
+      id: db.uid(), date: customDate || diary?.date || selectedDate.value, text: trimmed,
+      done: false, isImportant, time: customTime || undefined, diaryId, createdAt: Date.now(),
+    });
+  }
+  /** 勾选/取消勾选：独立面板与日记内嵌视图读同一数据源，天然实时同步 */
+  function toggleTodo(id: string): void {
+    const target = todos.value.find((t) => t.id === id);
+    if (!target) return;
+    upsertTodo({ ...target, done: !target.done });
+  }
+  /** 切换「重要」标记：重要且未完成时跨日置顶常驻 */
+  function toggleImportant(id: string): void {
+    const target = todos.value.find((t) => t.id === id);
+    if (!target) return;
+    upsertTodo({ ...target, isImportant: !target.isImportant });
+  }
+  function removeTodo(id: string): void {
+    todos.value = db.removeTodo(id);
   }
 
-  // ---------- 聚合查询（只读透传） ----------
-  function getSkillsMap(): Record<string, Person[]> {
-    return dbService.getSkillsMap()
+  /* ---------- 关系图谱 ---------- */
+  function upsertRelation(r: RelationEdge): void {
+    relations.value = db.upsertRelation(r);
+  }
+  function removeRelation(id: string): void {
+    relations.value = db.removeRelation(id);
   }
 
-  function getCalendarSummary(yearMonth: string): CalendarDaySummary[] {
-    return dbService.getCalendarSummary(yearMonth)
+  /* ---------- 派生数据 ---------- */
+  /** 某日待办 = 全局未完成的重要待办（跨日常驻置顶）+ 当日待办 */
+  function todosForDay(date: ISODate): TodoItem[] {
+    const pinned = todos.value.filter((t) => t.isImportant && !t.done);
+    const rest = todos.value.filter((t) => t.date === date && !(t.isImportant && !t.done));
+    return [...pinned, ...rest];
   }
+  const todosOfSelectedDate = computed<TodoItem[]>(() => todosForDay(selectedDate.value));
+  const diaryOfSelectedDate = computed<DiaryItem | undefined>(() =>
+    diaries.value.find((d) => d.date === selectedDate.value),
+  );
+  function todosOfDiary(diaryId: string): TodoItem[] {
+    return todos.value.filter((t) => t.diaryId === diaryId);
+  }
+  /** 全量单格缩略聚合（直接消费内存数据，任一 ref 变更自动重算） */
+  const summaryMap = computed<Record<ISODate, DaySummary>>(() =>
+    db.getDaySummaryMap({
+      contacts: contacts.value,
+      ledger: ledger.value,
+      diaries: diaries.value,
+      todos: todos.value,
+      relations: relations.value,
+    }),
+  );
+  /** 历史标签去重候选（通讯录表单聚焦时弹出） */
+  const historyTags = computed<string[]>(() => db.collectHistoryTags(contacts.value));
+  /** 人情往来历史标签去重候选 */
+  const historyFavorTags = computed<string[]>(() => db.collectFavorTags(contacts.value));
 
-  function getGraphData(): GraphData {
-    return dbService.getGraphData()
+  /** 全部人情往来拍平列表（按日期倒序，附带联系人信息，供「全部」模式展示） */
+  interface FavorRow {
+    favor: FavorRecord;
+    contactId: string;
+    contactName: string;
   }
+  const allFavors = computed<FavorRow[]>(() => {
+    const rows: FavorRow[] = [];
+    for (const c of contacts.value) {
+      for (const f of c.favors) {
+        rows.push({ favor: f, contactId: c.id, contactName: c.name });
+      }
+    }
+    rows.sort((a, b) => (a.favor.date < b.favor.date ? 1 : a.favor.date > b.favor.date ? -1 : 0));
+    return rows;
+  });
 
-  function upsertRelation(edge: Partial<RelationEdge> & { sourcePersonId: string; targetPersonId: string }): RelationEdge {
-    const saved = dbService.upsertRelation(edge)
-    refreshAll()
-    return saved
-  }
-
-  function deleteRelation(id: string): void {
-    dbService.deleteRelation(id)
-    refreshAll()
-  }
-
-  // ---------- AI 识别落库 ----------
-  function applyAiParsedResult(result: AiParsedResult, rawText: string, source: RecordSource): AiApplyOutcome {
-    const outcome = dbService.applyAiParsedResult(result, rawText, source)
-    refreshAll()
-    return outcome
-  }
-
-  // ---------- 数据互通 ----------
-  function exportAllToJson(): string {
-    return dbService.exportAllToJson()
-  }
-
-  function importFromJson(json: string): void {
-    dbService.importFromJson(json)
-    refreshAll()
-  }
-
-  function exportRecordsToCsv(filter: RecordFilter = {}): string {
-    return dbService.exportRecordsToCsv(filter)
-  }
+  loadAll();
+  loadLayoutState();
 
   return {
-    // state
-    initialized,
-    persons,
-    records,
-    relations,
-    // getters
-    activePersons,
-    cutoffPersons,
-    deceasedPersons,
-    giftRecords,
-    ledgerRecords,
-    ideaRecords,
-    // actions
-    init,
-    getPersonsByFilter,
-    upsertPerson,
-    deletePerson,
-    getRecordsByFilter,
-    addRecord,
-    deleteRecord,
-    getSkillsMap,
-    getCalendarSummary,
-    getGraphData,
-    upsertRelation,
-    deleteRelation,
-    applyAiParsedResult,
-    exportAllToJson,
-    importFromJson,
-    exportRecordsToCsv,
-  }
-})
+    contacts, ledger, diaries, todos, relations,
+    selectedDate, activePanel, editingId, contactScope, ledgerScope, diaryScope, favorEdit,
+    layoutOrder, layoutHeights, loadLayoutState, applyLayout,
+    loadAll, selectDate, setContactScope, setLedgerScope, setDiaryScope,
+    openPanel, openFavorPanel, closePanel,
+    upsertContact, removeContact, upsertFavor, removeFavor,
+    upsertLedger, removeLedger,
+    toggleLedgerDanger, markLedgerSettled, addLedgerRepayment,
+    upsertDiary, removeDiary, upsertTodo, createTodo, addTodoForDiary,
+    toggleTodo, toggleImportant, removeTodo,
+    upsertRelation, removeRelation,
+    todosForDay, todosOfSelectedDate, diaryOfSelectedDate, todosOfDiary,
+    summaryMap, historyTags, historyFavorTags, allFavors,
+  };
+});

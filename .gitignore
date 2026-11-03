@@ -1,23 +1,14 @@
-# dependencies
 node_modules/
-
-# build output
 dist/
+.jdk/
+android/.gradle/
+android/.kotlin/
 android/app/build/
 android/build/
-android/.gradle/
 android/local.properties
-
-# Capacitor 同步产物（构建时由 cap sync 生成）
-android/app/src/main/assets/public/
-android/app/src/main/assets/capacitor.config.json
-android/app/src/main/assets/capacitor.plugins.json
-android/app/src/main/res/xml/config.xml
-android/capacitor-cordova-android-plugins/
-
-# 本地工具与临时文件
+android/app/src/main/assets/public
+android/capacitor-cordova-android-plugins
+*.apk
+*.aab
 .screenshots/
 .trae-html-share-packages/
-*.log
-.DS_Store
-Thumbs.db
