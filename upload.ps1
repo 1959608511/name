@@ -64,14 +64,14 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 git branch -M main
-git commit -m "backup: name 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Null
+git commit -m "backup: name 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Host
 
 Write-Step "正在上传到 GitHub，请稍候（若弹出登录窗口请完成授权）..."
 
 $pushOk = $false
 $maxAttempts = 3
 for ($i = 1; $i -le $maxAttempts -and -not $pushOk; $i++) {
-    git push -u origin main 2>$null | Out-Null
+    git push -u origin main | Out-Host
     $pushOk = ($LASTEXITCODE -eq 0)
     if (-not $pushOk -and $i -lt $maxAttempts) {
         Write-Warn2 "网络不太稳定，正在自动重试（第 $($i + 1) 次）..."
@@ -81,9 +81,9 @@ for ($i = 1; $i -le $maxAttempts -and -not $pushOk; $i++) {
 
 if (-not $pushOk) {
     Write-Warn2 "上传遇到阻碍，正在自动处理..."
-    git pull origin main --allow-unrelated-histories --no-edit 2>$null | Out-Null
+    git pull origin main --allow-unrelated-histories --no-edit | Out-Host
     if ($LASTEXITCODE -eq 0) {
-        git push -u origin main 2>$null | Out-Null
+        git push -u origin main | Out-Host
         $pushOk = ($LASTEXITCODE -eq 0)
     }
 }
@@ -92,7 +92,7 @@ if (-not $pushOk) {
     Write-Warn2 "远端仓库里有和本地不一样的内容，无法自动合并。"
     $answer = Read-Host "是否用本地文件覆盖远端（会删掉远端旧内容）？输入 y 确认"
     if ($answer -eq 'y') {
-        git push --force origin main 2>$null | Out-Null
+        git push --force origin main | Out-Host
         $pushOk = ($LASTEXITCODE -eq 0)
     }
 }
@@ -124,7 +124,7 @@ if ($remoteHash -ne $localHash) {
 }
 
 # 提交哈希一致后，再逐文件比对文件清单（双保险）
-git fetch origin main --quiet 2>$null
+git fetch origin main | Out-Host
 $localFiles  = @(git ls-files)
 $remoteFiles = @(git ls-tree -r origin/main --name-only)
 
