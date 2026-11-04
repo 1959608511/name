@@ -9,6 +9,7 @@ import type {
   ContactScope,
   DaySummary,
   DiaryItem,
+  DiaryScope,
   FavorRecord,
   ISODate,
   LedgerItem,
@@ -38,8 +39,8 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
   const contactScope = ref<ContactScope>('day');
   /** 记账小模块展示范围：当日 / 全部 / 借还 */
   const ledgerScope = ref<LedgerScope>('day');
-  /** 日记·待办小模块展示范围：当日 / 全部 */
-  const diaryScope = ref<'day' | 'all'>('day');
+  /** 日记·待办小模块展示范围：当日 / 全部待办 / 全部日记 */
+  const diaryScope = ref<DiaryScope>('day');
   /** 人情往来编辑上下文（contactId + favorId，区别于通用 editingId） */
   const favorEdit = ref<{ contactId?: string; favorId?: string } | null>(null);
   /** 工作台小模块布局：排列顺序 + 各模块固定像素高度（fishcrm_v2_layout） */
@@ -82,7 +83,7 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
   function setLedgerScope(s: LedgerScope): void {
     ledgerScope.value = s;
   }
-  function setDiaryScope(s: 'day' | 'all'): void {
+  function setDiaryScope(s: DiaryScope): void {
     diaryScope.value = s;
   }
   function openPanel(p: Exclude<PanelType, 'none'>, editId?: string): void {
@@ -181,11 +182,9 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
   function upsertDiary(d: DiaryItem): void {
     diaries.value = db.upsertDiary(d);
   }
+  /** 删除日记：日记与待办已解耦，仅删除日记本身，待办独立保留 */
   function removeDiary(id: string): void {
     diaries.value = db.removeDiary(id);
-    // 日记删除后，其内嵌待办降级为独立待办（保留数据不丢失）
-    todos.value = todos.value.map((t) => (t.diaryId === id ? { ...t, diaryId: undefined } : t));
-    db.saveTodos(todos.value);
   }
 
   /* ---------- 待办（日记内嵌 ↔ 独立列表双向同步：同一 todos 数据源） ---------- */

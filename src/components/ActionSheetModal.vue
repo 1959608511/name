@@ -30,6 +30,16 @@ watch(() => props.panel, (p) => {
   if (p === 'contact' || p === 'favor') duoMode.value = p;
 });
 
+/** 弹窗刚打开的时间戳，配合 350ms 防护锁杜绝残余触摸事件瞬间误关 */
+let openedAt = 0;
+watch(() => props.panel, (val, oldVal) => {
+  if (val !== 'none' && oldVal === 'none') openedAt = Date.now();
+});
+function onOverlayClick(): void {
+  if (Date.now() - openedAt < 350) return;
+  emit('close');
+}
+
 const PANEL_TITLE: Record<Exclude<PanelType, 'none'>, string> = {
   choose: '新建', todo: '待办事项', contact: '联系人', ledger: '记一笔', diary: '日记', favor: '人情往来',
 };
@@ -46,7 +56,7 @@ function onChoose(kind: 'contact' | 'ledger' | 'diary'): void {
 <template>
   <Teleport to="body">
     <Transition name="sheet">
-      <div v-if="visible" class="as-overlay" @click.self="emit('close')">
+      <div v-if="visible" class="as-overlay" @click.self="onOverlayClick">
         <div class="as-sheet">
           <div class="as-grip" />
           <div class="as-head">
@@ -56,7 +66,7 @@ function onChoose(kind: 'contact' | 'ledger' | 'diary'): void {
           </div>
 
           <ChooseSheet v-if="panel === 'choose'" :date="date" @choose="onChoose" @close="emit('close')" />
-          <TodoSheet v-else-if="panel === 'todo'" :date="date" />
+          <TodoSheet v-else-if="panel === 'todo'" :date="date" :edit-id="editId" />
           <template v-else-if="isDuo">
             <div class="as-seg">
               <button

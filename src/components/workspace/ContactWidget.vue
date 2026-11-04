@@ -36,16 +36,16 @@ const dayFavors = computed<FavorRow[]>(() => {
   return rows;
 });
 
-/** 当前展示的人情列表（人情往来模式全量倒序 / 当日模式） */
-const favorRows = computed<FavorRow[]>(() => (isFavors.value ? store.allFavors : dayFavors.value));
+/** 当前展示的人情列表（人情往来模式：全部记录；联系人模式：仅联系人，不展示人情；当日模式：当日记录） */
+const favorRows = computed<FavorRow[]>(() => (isFavors.value ? store.allFavors : isContacts.value ? [] : dayFavors.value));
 
 /** 当日建档的联系人：即使没有任何人情往来，也必须在通讯录小模块立即可见 */
 const dayContacts = computed<ContactPerson[]>(() =>
   store.contacts.filter((c) => contactDateOf(c) === props.selectedDate),
 );
 
-/** 当前展示的联系人（联系人模式全量 / 当日模式） */
-const contactRows = computed<ContactPerson[]>(() => (isContacts.value ? store.contacts : dayContacts.value));
+/** 当前展示的联系人（联系人模式：全部联系人；人情模式：仅人情，不展示联系人；当日模式：当日建档） */
+const contactRows = computed<ContactPerson[]>(() => (isContacts.value ? store.contacts : isFavors.value ? [] : dayContacts.value));
 const hasAny = computed(() => favorRows.value.length > 0 || contactRows.value.length > 0);
 
 const meta = computed(() => {
@@ -63,7 +63,7 @@ function addFavorFor(contactId: string): void {
   store.openFavorPanel(contactId);
 }
 function editContact(id: string): void {
-  emit('edit', id);
+  store.openPanel('contact', id);
 }
 /** 切换「联系人」全量视图：仅显示全部联系人列表，再次点击恢复当日 */
 function toggleContacts(): void {
@@ -100,7 +100,7 @@ function onAdd(): void {
         type="button"
         @click="toggleFavors"
       >人情往来</button>
-      <button class="cw-btn cw-btn-create" type="button" @click="onAdd">+ 添加</button>
+      <button class="cw-btn cw-btn-create" type="button" @click="onAdd">添加</button>
     </template>
 
     <template v-if="favorRows.length">
@@ -137,8 +137,8 @@ function onAdd(): void {
           </span>
         </button>
         <div class="cw-ops">
-          <button class="cw-mini" type="button" @click="addFavorFor(c.id)">+记人情</button>
-          <button class="cw-mini" type="button" @click="editContact(c.id)">编辑</button>
+          <button class="cw-mini" type="button" @click.stop="addFavorFor(c.id)">+记人情</button>
+          <button class="cw-mini" type="button" @click.stop="editContact(c.id)">编辑</button>
         </div>
       </div>
     </div>

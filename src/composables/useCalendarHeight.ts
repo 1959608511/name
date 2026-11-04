@@ -14,10 +14,39 @@ const calH = ref(geometry.value.H_FULL);
 const isResizing = ref(false);
 
 let snapRaf = 0;
+let glideRaf = 0;
 
 function cancelSnap(): void {
   if (snapRaf) cancelAnimationFrame(snapRaf);
   snapRaf = 0;
+}
+
+/** 功能模块滚动容器（下半屏）：与日历高度共用同一手势状态机，实现无缝接力 */
+function getScroller(): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+  return document.querySelector<HTMLElement>('.rw-root');
+}
+
+function cancelGlide(): void {
+  if (glideRaf) cancelAnimationFrame(glideRaf);
+  glideRaf = 0;
+}
+
+/** 松手后的惯性衰减：直接驱动功能模块容器滚动，不参与日历形态变化 */
+function glideScroll(scroller: HTMLElement, velocity: number): void {
+  cancelGlide();
+  let step = -velocity * 16;
+  if (Math.abs(step) < 0.4) return;
+  const tick = (): void => {
+    step *= 0.94;
+    if (Math.abs(step) < 0.4) { glideRaf = 0; return; }
+    const before = scroller.scrollTop;
+    scroller.scrollTop = before + step;
+    // 触顶 / 触底（scrollTop 被夹紧且不再变化）立刻停止滑行
+    if (scroller.scrollTop === before) { glideRaf = 0; return; }
+    glideRaf = requestAnimationFrame(tick);
+  };
+  glideRaf = requestAnimationFrame(tick);
 }
 
 /** 吸附动画：只改变形态高度，不参与任何内部滚动 */
@@ -54,21 +83,47 @@ function syncViewport(avail: number): void {
   calH.value = wasFull ? geometry.value.H_FULL : clampHeight(calH.value, geometry.value);
 }
 
-/** 手势开始：立刻刹停吸附动画 */
+/** 手势开始：立刻刹停吸附与惯性动画 */
 function beginDrag(): void {
   cancelSnap();
+  cancelGlide();
 }
 
-/** 1:1 跟手位移 */
+/** 1:1 跟手位移：日历缩放与功能模块滚动无缝接力 */
 function dragBy(dy: number): void {
   cancelSnap();
+  cancelGlide();
   isResizing.value = true;
-  calH.value = clampHeight(calH.value + dy, geometry.value);
+  const scroller = getScroller();
+
+  if (dy < 0) {
+    // 向上：优先缩小日历，缩到最小窄条后剩余位移直接滚动功能模块
+    const shrinkable = Math.max(0, calH.value - geometry.value.H_STRIP);
+    const usedByCal = Math.min(shrinkable, -dy);
+    if (usedByCal > 0) calH.value = clampHeight(calH.value - usedByCal, geometry.value);
+    const leftover = -dy - usedByCal;
+    if (leftover > 0 && scroller) scroller.scrollTop += leftover;
+    return;
+  }
+
+  if (dy > 0) {
+    // 向下：优先把功能模块滚回顶部，到顶后剩余位移无缝展开日历
+    const usedByScroll = scroller ? Math.min(dy, Math.max(0, scroller.scrollTop)) : 0;
+    if (usedByScroll > 0 && scroller) scroller.scrollTop -= usedByScroll;
+    const leftover = dy - usedByScroll;
+    if (leftover > 0) calH.value = clampHeight(calH.value + leftover, geometry.value);
+  }
 }
 
-/** 手势结束：按速度吸附到最近形态锚点 */
+/** 手势结束：窄条态且功能模块未回顶时保持窄条并惯性滑行，否则按速度吸附锚点 */
 function endDrag(velocity: number): void {
   isResizing.value = false;
+  const scroller = getScroller();
+  if (scroller && calH.value <= geometry.value.H_STRIP + 0.5 && scroller.scrollTop > 0) {
+    calH.value = geometry.value.H_STRIP;
+    glideScroll(scroller, velocity);
+    return;
+  }
   animateTo(snapHeight(calH.value, velocity, geometry.value));
 }
 

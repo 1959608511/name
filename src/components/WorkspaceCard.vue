@@ -21,12 +21,14 @@ const cal = useCalendarHeight();
 const zoneEl = ref<HTMLDivElement | null>(null);
 
 const LONG_MS = 450;
-/** 纵向 > 3px 判定缩放；横向 > 6px 判定下层滑动；轻点 / 长按容差 6px */
-const SCROLL_EPS = 3, HSWIPE_EPS = 6, TAP_EPS = 6, HEAD_EPS = 6;
+/** 纵向 > 7px 判定缩放；横向 > 6px 判定下层滑动；轻点 / 长按容差 7px（避免手指抖动吞掉点击） */
+const SCROLL_EPS = 7, HSWIPE_EPS = 6, TAP_EPS = 7, HEAD_EPS = 6;
 
 /* 右半区手势态 */
 let startX = 0, startY = 0, lastY = 0, lastT = 0, velocity = 0;
 let moved = false, longFired = false, longTimer = 0, suppressTill = 0;
+/** 最近一次触摸轻点透传时间，用于抑制紧随其后的合成 click 双触发 */
+let lastTouchTapAt = 0;
 let dragMode: 'none' | 'calendar' | 'horiz' = 'none';
 let swipeEl: Element | null = null;
 let editMode: 'none' | 'resize' | 'move' = 'none';
@@ -59,9 +61,17 @@ function forwardTap(x: number, y: number): void {
   zone.style.pointerEvents = 'none';
   try {
     const hit = document.elementFromPoint(x, y);
-    const el = hit ? hit.closest('button, a, input, textarea, select, [role="button"]') : null;
+    const el = hit
+      ? hit.closest('button, a, input, textarea, select, [role="button"], .lw-row, .dw-todo, .dw-diary, .cw-row, .cw-contact-main')
+      : null;
     if (el instanceof HTMLElement) el.click();
   } finally { zone.style.pointerEvents = ''; }
+}
+/** 拦截层点击：鼠标 / WebView 合成点击同样按坐标透传给下层按钮 */
+function onZoneClick(e: MouseEvent): void {
+  // 触摸轻点已由 touchend 透传，跳过紧随其后的合成 click 防止双触发
+  if (props.editing || Date.now() < suppressTill || Date.now() - lastTouchTapAt < 500) return;
+  forwardTap(e.clientX, e.clientY);
 }
 
 /* ---------------- 右半区：上下缩放 / 左右滑动 / 轻点 / 长按 ---------------- */
@@ -118,7 +128,12 @@ function onZoneEnd(e: TouchEvent): void {
   if (dragMode === 'calendar') { cal.endDrag(velocity); suppressTill = Date.now() + 300; }
   else if (dragMode === 'horiz') { endHoriz(); suppressTill = Date.now() + 300; }
   dragMode = 'none'; moved = false; longFired = false;
-  if (isTap && !props.editing) forwardTap(x, y);
+  if (isTap && !props.editing) {
+    // 阻止浏览器在 touchend 后 20ms 合成幽灵 click 打到新弹出的弹窗遮罩上
+    if (e.cancelable) e.preventDefault();
+    lastTouchTapAt = Date.now();
+    forwardTap(x, y);
+  }
 }
 function onZoneCancel(): void {
   clearTimer('long');
@@ -233,9 +248,13 @@ onBeforeUnmount(() => { clearTimer('long'); clearTimer('body'); clearTimer('head
       <div class="wc-scroll"><slot /></div>
       <!-- 右半区物理手势拦截层：touch-action:none 禁止一切原生滚动 -->
       <div v-if="!editing" ref="zoneEl" class="wc-right-zone" @touchstart.stop="onZoneStart"
-        @touchmove.stop.prevent="onZoneMove" @touchend.stop="onZoneEnd" @touchcancel.stop="onZoneCancel" />
+        @touchmove.stop.prevent="onZoneMove" @touchend.stop="onZoneEnd" @touchcancel.stop="onZoneCancel"
+        @click.stop="onZoneClick" />
     </div>
-    <div v-if="$slots.footer" class="wc-foot"><slot name="footer" /></div>
+    <div v-if="$slots.footer" class="wc-foot"
+      @touchstart="onHeadStart" @touchmove.prevent="onHeadMove" @touchend="onHeadEnd" @touchcancel="onHeadCancel">
+      <slot name="footer" />
+    </div>
     <template v-if="editing">
       <div class="wc-move-layer" @touchstart.passive="onEditStart($event, 'move')" @touchmove.passive="onEditMove"
         @touchend="onEditEnd" @touchcancel="onEditEnd" />
@@ -278,7 +297,15 @@ onBeforeUnmount(() => { clearTimer('long'); clearTimer('body'); clearTimer('head
 .wc-body-frozen .wc-scroll { overflow-y: hidden; }
 /* 右半区拦截层：物理禁止原生滚动，承载日历缩放与横向透传 */
 .wc-right-zone { position: absolute; top: 0; right: 0; bottom: 0; width: 50%; z-index: 15; touch-action: none; user-select: none; -webkit-user-select: none; background: transparent; }
-.wc-foot { flex-shrink: 0; padding: 4px 6px 6px; background: #fff; border-top: 1px solid #f5f7fa; }
+.wc-foot {
+  flex-shrink: 0; padding: 4px 6px 6px; background: #fff; border-top: 1px solid #f5f7fa;
+  /* 底部输入栏同样接入上下滑缩放手势，禁止原生滚动 / 长按选中 */
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+/* 底部插槽内的按钮与输入框同步禁止原生滚动与长按选中 */
+.wc-foot :deep(button), .wc-foot :deep(input) {
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
 /* 编辑态拖拽层与底边加粗把手 */
 .wc-move-layer { position: absolute; inset: 0; z-index: 12; touch-action: none; }
 .wc-handle { position: absolute; left: 0; right: 0; bottom: 0; height: 18px; z-index: 14; display: flex; align-items: center; justify-content: center; touch-action: none; }

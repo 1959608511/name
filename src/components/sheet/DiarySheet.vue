@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 日记新建 / 编辑表单（关联待办「+」即时落库，支持日期 / 时间与全屏沉浸书写） */
+/** 日记新建 / 编辑表单（待办与日记解耦：直接展示并独立落库当日待办） */
 import { computed, reactive, ref } from 'vue';
 import { Maximize2, Minimize2 } from '@lucide/vue';
 import type { DiaryItem, ISODate } from '../../types/schema';
@@ -10,8 +10,6 @@ const props = defineProps<{ date: ISODate; editId?: string }>();
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const store = useCrmStore();
-/** 新建日记时预生成的固定 id：待办先落库，后续保存日记复用同一 id 保证关联不断链 */
-const draftDiaryId = uid();
 const diaryForm = reactive({ id: undefined as string | undefined, date: '', content: '' });
 const inlineText = ref('');
 const inlineImportant = ref(false);
@@ -19,9 +17,9 @@ const pickedDate = ref('');
 const pickedTime = ref('');
 const fullscreen = ref(false);
 
-const currentDiaryId = computed(() => diaryForm.id ?? draftDiaryId);
-const existingTodos = computed(() => store.todosOfDiary(currentDiaryId.value));
 const baseDate = computed(() => diaryForm.date || props.date);
+/** 当日待办（含跨日常驻重要待办），与待办面板同一数据源，实时同步 */
+const existingTodos = computed(() => store.todosForDay(baseDate.value));
 
 function initDiary(): void {
   const d = props.editId
@@ -33,14 +31,11 @@ function initDiary(): void {
   pickedDate.value = '';
   pickedTime.value = '';
 }
-/** 点「+」或回车：立即落库该条关联待办，不再依赖底部总保存 */
+/** 点「+」或回车：待办独立落库，不依赖日记是否保存 */
 function addInline(): void {
   const text = inlineText.value.trim();
   if (!text) return;
-  store.addTodoForDiary(
-    currentDiaryId.value, text, inlineImportant.value,
-    pickedDate.value || baseDate.value, pickedTime.value || undefined,
-  );
+  store.createTodo(text, inlineImportant.value, pickedDate.value || baseDate.value, pickedTime.value || undefined);
   inlineText.value = '';
   inlineImportant.value = false;
   pickedDate.value = '';
@@ -51,10 +46,11 @@ function removeExistingTodo(id: string): void {
 }
 function saveDiary(): void {
   const content = diaryForm.content.trim();
-  if (!content && !existingTodos.value.length && !diaryForm.id) return;
-  const existing = store.diaries.find((d) => d.id === currentDiaryId.value);
+  // 没有正文且不是编辑既有日记：直接关闭，不创建空日记
+  if (!content && !diaryForm.id) { emit('close'); return; }
+  const existing = store.diaries.find((d) => d.id === diaryForm.id);
   const d: DiaryItem = {
-    id: currentDiaryId.value, date: baseDate.value, content,
+    id: diaryForm.id ?? uid(), date: baseDate.value, content,
     createdAt: existing?.createdAt ?? Date.now(),
   };
   store.upsertDiary(d);
@@ -88,23 +84,28 @@ initDiary();
       </button>
     </div>
 
-    <label class="as-label">关联待办（添加即保存，与待办面板实时同步）</label>
-    <div v-for="t in existingTodos" :key="t.id" class="as-todo">
-      <button class="as-check" :class="{ on: t.done }" type="button" @click="store.toggleTodo(t.id)">
+    <label class="as-label">当日待办（添加即保存，与待办面板实时同步）</label>
+    <div
+      v-for="t in existingTodos"
+      :key="t.id"
+      class="as-todo"
+      @click="store.openPanel('todo', t.id)"
+    >
+      <button class="as-check" :class="{ on: t.done }" type="button" @click.stop="store.toggleTodo(t.id)">
         <span v-if="t.done">✓</span>
       </button>
       <span class="as-todo-text">{{ t.text }}</span>
       <span v-if="t.time" class="as-chip as-chip-time">⏰ {{ t.time }}</span>
       <span v-if="t.date !== baseDate" class="as-chip as-chip-date">📅 {{ t.date.slice(5) }}</span>
       <span v-if="t.isImportant && !t.done" class="as-badge">重要</span>
-      <button class="as-star" :class="{ on: t.isImportant }" type="button" @click="store.toggleImportant(t.id)">
+      <button class="as-star" :class="{ on: t.isImportant }" type="button" @click.stop="store.toggleImportant(t.id)">
         {{ t.isImportant ? '★' : '☆' }}
       </button>
-      <button class="as-del-mini" type="button" @click="removeExistingTodo(t.id)">🗑</button>
+      <button class="as-del-mini" type="button" @click.stop="removeExistingTodo(t.id)">🗑</button>
     </div>
 
     <div class="as-add">
-      <input v-model="inlineText" class="as-input" placeholder="+ 随手添加关联待办，回车即保存" @keyup.enter="addInline" />
+      <input v-model="inlineText" class="as-input" placeholder="添加待办" @keyup.enter="addInline" />
       <button class="as-flag" :class="{ on: inlineImportant }" type="button" @click="inlineImportant = !inlineImportant">
         重要
       </button>
@@ -160,7 +161,8 @@ initDiary();
 }
 .as-full-btn:active { transform: scale(0.95); }
 .as-full-btn:hover { color: #4f46e5; border-color: #c7d2fe; }
-.as-todo { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
+.as-todo { display: flex; align-items: center; gap: 6px; padding: 5px 4px; border-radius: 8px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.as-todo:active { background: #f8fafc; }
 .as-check {
   width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #cbd5e1;
   background: #fff; color: #fff; font-size: 10px; flex-shrink: 0; padding: 0;

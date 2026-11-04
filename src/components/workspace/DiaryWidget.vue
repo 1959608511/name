@@ -1,7 +1,7 @@
 <script setup lang="ts">
-/** 工作台 · 日记 / 待办窗口（当日视图 / 全部视图切换，正文 + 关联待办双向同步） */
+/** 工作台 · 日记 / 待办窗口（当日 / 全部待办 / 全部日记三态切换，正文 + 关联待办双向同步） */
 import { computed, ref } from 'vue';
-import type { ISODate, TodoItem } from '../../types/schema';
+import type { DiaryScope, ISODate, TodoItem } from '../../types/schema';
 import { useCrmStore } from '../../store/useCrmStore';
 import WorkspaceCard from '../WorkspaceCard.vue';
 
@@ -17,7 +17,10 @@ const newTodoImportant = ref(false);
 const pickedDate = ref('');
 const pickedTime = ref('');
 
-const isAll = computed(() => store.diaryScope === 'all');
+/** 非当日模式（全部待办 / 全部日记）统一展示日期标识 */
+const isAll = computed(() => store.diaryScope !== 'day');
+const isTodos = computed(() => store.diaryScope === 'todos');
+const isDiaries = computed(() => store.diaryScope === 'diaries');
 
 /** 日期倒序（同日按录入时间倒序） */
 function byDateDesc(a: TodoItem, b: TodoItem): number {
@@ -28,21 +31,31 @@ function byDateDesc(a: TodoItem, b: TodoItem): number {
 const dayDiary = computed(() => store.diaries.find((d) => d.date === props.selectedDate));
 const dayTodos = computed(() => store.todosForDay(props.selectedDate));
 
-/** 全部模式：所有日记按日期倒序 */
+/** 全部日记按日期倒序 */
 const allDiaries = computed(() => store.diaries.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)));
-/** 全部模式：未完成重要待办置顶，其余按日期倒序 */
+/** 全部待办：未完成重要待办置顶，其余按日期倒序 */
 const allTodos = computed(() => {
   const pinned = store.todos.filter((t) => t.isImportant && !t.done).sort(byDateDesc);
   const rest = store.todos.filter((t) => !(t.isImportant && !t.done)).sort(byDateDesc);
   return [...pinned, ...rest];
 });
 
-const diaryList = computed(() => (isAll.value ? allDiaries.value : dayDiary.value ? [dayDiary.value] : []));
-const todoList = computed(() => (isAll.value ? allTodos.value : dayTodos.value));
+/** 待办模式仅显示待办；日记模式仅显示日记；默认当日模式两者并显 */
+const diaryList = computed(() => {
+  if (isTodos.value) return [];
+  if (isDiaries.value) return allDiaries.value;
+  return dayDiary.value ? [dayDiary.value] : [];
+});
+const todoList = computed(() => {
+  if (isDiaries.value) return [];
+  if (isTodos.value) return allTodos.value;
+  return dayTodos.value;
+});
 const undoneCount = computed(() => todoList.value.filter((t) => !t.done).length);
 
-function toggleScope(): void {
-  store.setDiaryScope(isAll.value ? 'day' : 'all');
+/** 再次点击已高亮的按钮即取消高亮，回到默认当日模式 */
+function toggleScope(s: Exclude<DiaryScope, 'day'>): void {
+  store.setDiaryScope(store.diaryScope === s ? 'day' : s);
 }
 function addInlineTodo(): void {
   const text = newTodoText.value.trim();
@@ -62,8 +75,9 @@ function addInlineTodo(): void {
     :meta="undoneCount ? `${undoneCount} 项未完成` : ''"
   >
     <template #actions>
+      <button class="dw-act" :class="{ 'dw-act-on': isTodos }" type="button" @click="toggleScope('todos')">待办</button>
+      <button class="dw-act" :class="{ 'dw-act-on': isDiaries }" type="button" @click="toggleScope('diaries')">日记</button>
       <button class="dw-act dw-act-violet" type="button" @click="emit('create')">+ 写日记</button>
-      <button class="dw-act" :class="{ 'dw-act-on': isAll }" type="button" @click="toggleScope">全部</button>
     </template>
 
     <div
@@ -75,17 +89,26 @@ function addInlineTodo(): void {
       <span v-if="isAll" class="dw-date">{{ d.date }}</span>
       <span class="dw-diary-text">{{ d.content }}</span>
     </div>
-    <p v-if="!diaryList.length" class="dw-empty">点右上角写下今天的日记</p>
+    <p v-if="!isTodos && !diaryList.length" class="dw-empty">
+      {{ isDiaries ? '还没有任何日记记录' : '点右上角写下今天的日记' }}
+    </p>
+    <p v-if="isTodos && !todoList.length" class="dw-empty">还没有任何待办事项</p>
     <div class="dw-todos">
-      <div v-for="t in todoList" :key="t.id" class="dw-todo" :class="{ 'dw-todo-done': t.done }">
-        <button class="dw-check" :class="{ on: t.done }" type="button" @click="store.toggleTodo(t.id)">
+      <div
+        v-for="t in todoList"
+        :key="t.id"
+        class="dw-todo"
+        :class="{ 'dw-todo-done': t.done }"
+        @click="store.openPanel('todo', t.id)"
+      >
+        <button class="dw-check" :class="{ on: t.done }" type="button" @click.stop="store.toggleTodo(t.id)">
           <span v-if="t.done">✓</span>
         </button>
         <span class="dw-todo-text">{{ t.text }}</span>
         <span v-if="t.time" class="dw-chip dw-chip-time">⏰ {{ t.time }}</span>
         <span v-if="t.isImportant && !t.done" class="dw-badge">重要</span>
         <span v-if="isAll || t.date !== selectedDate" class="dw-badge dw-badge-date">{{ t.date.slice(5) }}</span>
-        <button class="dw-star" :class="{ on: t.isImportant }" type="button" @click="store.toggleImportant(t.id)">
+        <button class="dw-star" :class="{ on: t.isImportant }" type="button" @click.stop="store.toggleImportant(t.id)">
           {{ t.isImportant ? '★' : '☆' }}
         </button>
       </div>
@@ -107,7 +130,7 @@ function addInlineTodo(): void {
             v-model="newTodoText"
             class="dw-input"
             type="text"
-            placeholder="随手添加关联待办"
+            placeholder="添加待办"
             @keyup.enter="addInlineTodo"
           />
           <div class="dw-picker" :class="{ on: pickedDate }" title="选择日期">
@@ -156,7 +179,8 @@ function addInlineTodo(): void {
 }
 .dw-empty { font-size: 11px; color: #b6c2d2; padding: 8px 4px; }
 .dw-todos { display: flex; flex-direction: column; }
-.dw-todo { display: flex; align-items: center; gap: 6px; padding: 3px 4px; }
+.dw-todo { display: flex; align-items: center; gap: 6px; padding: 3px 4px; border-radius: 8px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.dw-todo:active { background: #f8fafc; }
 .dw-check {
   width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #cbd5e1;
   background: #fff; display: flex; align-items: center; justify-content: center;

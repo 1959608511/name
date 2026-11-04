@@ -18,7 +18,7 @@ const ledgerForm = reactive({
   id: undefined as string | undefined,
   date: '', time: '', category: 'expense' as LedgerCategory,
   amount: '', contactId: '', remark: '', tag: '',
-  direction: 'out' as 'out' | 'in', gift: '',
+  direction: 'out' as 'out' | 'in',
 });
 const ledgerError = ref('');
 /** 标签输入聚焦时弹出历史标签胶囊 */
@@ -42,7 +42,7 @@ function initLedger(): void {
     category: item?.category ?? 'expense',
     amount: item ? String(item.amount) : '', contactId: item?.contactId ?? '',
     remark: item?.remark ?? '', tag: item?.tag ?? '',
-    direction: item?.direction ?? 'out', gift: item?.gift ?? '',
+    direction: item?.direction ?? 'out',
   });
 }
 function saveLedger(): void {
@@ -62,7 +62,6 @@ function saveLedger(): void {
     time: ledgerForm.time || undefined,
     tag: ledgerForm.tag.trim() || undefined,
     direction: isOther ? ledgerForm.direction : undefined,
-    gift: isOther ? ledgerForm.gift.trim() || undefined : undefined,
     tempNote: existing?.tempNote,
     createdAt: existing?.createdAt ?? Date.now(),
     isSettled: existing?.isSettled,
@@ -103,10 +102,6 @@ initLedger();
       >{{ ledgerForm.direction === 'out' ? '付出 ↓' : '收到 ↑' }}</button>
     </div>
     <p v-if="ledgerError" class="as-error">{{ ledgerError }}</p>
-    <template v-if="ledgerForm.category === 'other'">
-      <label class="as-label">礼物 / 物品</label>
-      <input v-model="ledgerForm.gift" class="as-input" placeholder="如 手机 / 现金" />
-    </template>
     <label class="as-label">关联联系人</label>
     <select v-model="ledgerForm.contactId" class="as-input">
       <option value="">不关联</option>
@@ -167,7 +162,7 @@ initLedger();
 .as-amount-row { display: flex; align-items: stretch; gap: 8px; }
 .as-amount-row .as-amount { flex: 1; min-width: 0; width: auto; }
 .as-dir { border: 1px solid; border-radius: 10px; font-size: 12px; font-weight: 600; padding: 0 12px; flex-shrink: 0; }
-.as-dir-out { background: #fff1f2; color: #e11d48; border-color: #fecdd3; }
+.as-dir-out { background: #fff1f2; color: #dc2626; border-color: #fecdd3; }
 .as-dir-in { background: #ecfdf5; color: #059669; border-color: #a7f3d0; }
 .as-datetime { display: flex; gap: 8px; }
 .as-datetime .as-input { flex: 1; min-width: 0; width: auto; }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 工作台 · 记账窗口（当日 / 全部支出收入 / 借还 / 礼物四态切换，借还支持左右滑动「已还 / 危险」） */
+/** 工作台 · 记账窗口（当日 / 全部支出收入 / 借还三态切换，借还支持左右滑动「已还 / 危险」） */
 import { computed, reactive, ref } from 'vue';
 import type { ISODate, LedgerCategory, LedgerItem } from '../../types/schema';
 import { useCrmStore } from '../../store/useCrmStore';
@@ -21,7 +21,6 @@ const SWIPE_LOCK = 6;
 
 const isAll = computed(() => store.ledgerScope === 'all');
 const isLoan = computed(() => store.ledgerScope === 'loan');
-const isGift = computed(() => store.ledgerScope === 'gift');
 const isDay = computed(() => store.ledgerScope === 'day');
 
 function byTimeDesc(a: LedgerItem, b: LedgerItem): number {
@@ -38,20 +37,19 @@ function loanWeight(a: LedgerItem, b: LedgerItem): number {
 const dayItems = computed(() =>
   store.ledger.filter((i) => i.date === props.selectedDate).slice().sort((a, b) => b.createdAt - a.createdAt),
 );
-const allItems = computed(() => store.ledger.slice().sort(byTimeDesc));
-const loanItems = computed(() => store.ledger.filter((i) => i.category === 'other').slice().sort(loanWeight));
-const giftItems = computed(() =>
-  store.ledger.filter((i) => i.category === 'other' && i.gift).slice().sort(byTimeDesc),
+/** 全部支出/收入：只取 expense / income，不含借还 other */
+const allItems = computed(() =>
+  store.ledger.filter((i) => i.category !== 'other').slice().sort(byTimeDesc),
 );
+const loanItems = computed(() => store.ledger.filter((i) => i.category === 'other').slice().sort(loanWeight));
 const items = computed(() =>
-  isGift.value ? giftItems.value : isLoan.value ? loanItems.value : isAll.value ? allItems.value : dayItems.value,
+  isLoan.value ? loanItems.value : isAll.value ? allItems.value : dayItems.value,
 );
 
 const incomeTotal = computed(() => items.value.filter((i) => i.category === 'income').reduce((s, i) => s + i.amount, 0));
 const expenseTotal = computed(() => items.value.filter((i) => i.category === 'expense').reduce((s, i) => s + i.amount, 0));
 const ledgerMeta = computed(() => {
   if (!items.value.length) return '';
-  if (isGift.value) return `${giftItems.value.length} 笔礼物`;
   if (isLoan.value) return `${loanItems.value.length} 笔往来`;
   return `+${incomeTotal.value} / -${expenseTotal.value}`;
 });
@@ -62,10 +60,6 @@ function toggleAll(): void {
 }
 function toggleLoan(): void {
   store.setLedgerScope(isLoan.value ? 'day' : 'loan');
-  closeAll();
-}
-function toggleGift(): void {
-  store.setLedgerScope(isGift.value ? 'day' : 'gift');
   closeAll();
 }
 function categoryEmoji(c: LedgerCategory): string {
@@ -191,7 +185,6 @@ function closeRepay(): void {
     <template #actions>
       <button class="lw-act" :class="{ 'lw-act-on': isAll }" type="button" @click="toggleAll">全部支出/收入</button>
       <button class="lw-act lw-act-loan" :class="{ 'lw-act-loan-on': isLoan }" type="button" @click="toggleLoan">借还</button>
-      <button class="lw-act lw-act-gift" :class="{ 'lw-act-gift-on': isGift }" type="button" @click="toggleGift">礼物</button>
       <button class="lw-act lw-act-create" type="button" @click="emit('create')">+ 记一笔</button>
     </template>
 
@@ -229,7 +222,7 @@ function closeRepay(): void {
                 <span v-if="expandedId === item.id" class="lw-chevron">▾</span>
               </span>
               <span class="lw-sub" :class="{ 'lw-strike': item.isSettled }">
-                {{ item.contactName || categoryLabel(item.category) }}<template v-if="item.tempNote"> · {{ item.tempNote }}</template><template v-if="item.gift"> · 🎁{{ item.gift }}</template><template v-if="!isDay"> · {{ item.date.slice(5) }}</template><template v-if="item.time"> · {{ item.time }}</template><span v-if="totalRepaid(item) > 0" class="lw-repaid"> · 已还 ¥{{ formatMoney(totalRepaid(item)) }}</span>
+                {{ item.contactName || categoryLabel(item.category) }}<template v-if="item.tempNote"> · {{ item.tempNote }}</template><template v-if="!isDay"> · {{ item.date.slice(5) }}</template><template v-if="item.time"> · {{ item.time }}</template><span v-if="totalRepaid(item) > 0" class="lw-repaid"> · 已还 ¥{{ formatMoney(totalRepaid(item)) }}</span>
               </span>
             </span>
             <span
@@ -253,7 +246,7 @@ function closeRepay(): void {
               <span v-if="item.tag" class="lw-tag">{{ item.tag }}</span>
             </span>
             <span class="lw-sub" :class="{ 'lw-strike': item.isSettled }">
-              {{ item.contactName || categoryLabel(item.category) }}<template v-if="item.tempNote"> · {{ item.tempNote }}</template><template v-if="item.gift"> · 🎁{{ item.gift }}</template><template v-if="!isDay"> · {{ item.date.slice(5) }}</template><template v-if="item.time"> · {{ item.time }}</template><span v-if="totalRepaid(item) > 0" class="lw-repaid"> · 已还 ¥{{ formatMoney(totalRepaid(item)) }}</span>
+              {{ item.contactName || categoryLabel(item.category) }}<template v-if="item.tempNote"> · {{ item.tempNote }}</template><template v-if="!isDay"> · {{ item.date.slice(5) }}</template><template v-if="item.time"> · {{ item.time }}</template><span v-if="totalRepaid(item) > 0" class="lw-repaid"> · 已还 ¥{{ formatMoney(totalRepaid(item)) }}</span>
             </span>
           </span>
           <span
@@ -274,10 +267,13 @@ function closeRepay(): void {
         </div>
       </div>
     </template>
-    <p v-else class="lw-empty">{{ isGift ? '还没有礼物往来记录' : isLoan ? '还没有借还往来记录' : isAll ? '还没有任何收支流水' : '这天还没有收支流水' }}</p>
-  </WorkspaceCard>
+    <p v-else class="lw-empty">{{ isLoan ? '还没有借还往来记录' : isAll ? '还没有任何收支流水' : '这天还没有收支流水' }}</p>
 
-  <LedgerRepayModal v-if="repayItem" :item="repayItem" @close="closeRepay" />
+    <!-- 还款弹窗置于 WorkspaceCard 内部末尾，保证单根节点以继承父组件属性与事件 -->
+    <Teleport to="body">
+      <LedgerRepayModal v-if="repayItem" :item="repayItem" @close="closeRepay" />
+    </Teleport>
+  </WorkspaceCard>
 </template>
 
 <style scoped>
@@ -292,8 +288,6 @@ function closeRepay(): void {
 .lw-act-on { background: #334155; color: #fff; border-color: #334155; }
 .lw-act-loan { background: #f0fdfa; color: #0d9488; border-color: #ccfbf1; }
 .lw-act-loan-on { background: #0d9488; color: #fff; border-color: #0d9488; }
-.lw-act-gift { background: #fffbeb; color: #d97706; border-color: #fde68a; }
-.lw-act-gift-on { background: #d97706; color: #fff; border-color: #d97706; }
 .lw-act-create { background: #f8fafc; color: #334155; border-color: #e2e8f0; }
 
 .lw-item { padding: 1px 0; }

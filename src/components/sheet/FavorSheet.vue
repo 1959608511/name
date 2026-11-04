@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 人情往来新建 / 编辑表单（严格 4 字段：联系人 / 内容 / 日期 / 标签） */
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { ContactPerson, ISODate } from '../../types/schema';
 import { useCrmStore } from '../../store/useCrmStore';
 import { uid } from '../../services/dbService';
@@ -37,12 +37,25 @@ function initFavor(): void {
       });
       return;
     }
+  } else if (props.contactId) {
+    // 「+记人情」仅传 contactId：自动回填该联系人姓名与 id
+    const c = store.contacts.find((x) => x.id === props.contactId);
+    if (c) {
+      Object.assign(favorForm, {
+        contactName: c.name, contactId: c.id,
+        title: '', date: props.date, tag: '',
+      });
+      return;
+    }
   }
   Object.assign(favorForm, {
     contactName: '', contactId: undefined,
     title: '', date: props.date, tag: '',
   });
 }
+
+// 抽屉内切换联系人 / 人情时重新初始化，避免残留上一次表单内容
+watch(() => [props.contactId, props.favorId], initFavor);
 
 function addTag(tag: string): void {
   favorForm.tag = tag;
