@@ -6,6 +6,7 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type {
   ContactPerson,
+  ContactScope,
   DaySummary,
   DiaryItem,
   FavorRecord,
@@ -33,8 +34,8 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
   const activePanel = ref<PanelType>('none');
   /** 当前面板正在编辑的条目 id（undefined = 新建） */
   const editingId = ref<string | undefined>(undefined);
-  /** 通讯录小模块展示范围：当日 / 全部 */
-  const contactScope = ref<'day' | 'all'>('day');
+  /** 通讯录小模块展示范围：当日 / 全部联系人 / 全部人情往来 */
+  const contactScope = ref<ContactScope>('day');
   /** 记账小模块展示范围：当日 / 全部 / 借还 */
   const ledgerScope = ref<LedgerScope>('day');
   /** 日记·待办小模块展示范围：当日 / 全部 */
@@ -75,7 +76,7 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
     ledgerScope.value = 'day';
     diaryScope.value = 'day';
   }
-  function setContactScope(s: 'day' | 'all'): void {
+  function setContactScope(s: ContactScope): void {
     contactScope.value = s;
   }
   function setLedgerScope(s: LedgerScope): void {
@@ -87,10 +88,13 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
   function openPanel(p: Exclude<PanelType, 'none'>, editId?: string): void {
     activePanel.value = p;
     editingId.value = editId;
+    // 非人情面板一律清空人情编辑上下文，防止残留状态污染下次打开
+    if (p !== 'favor') favorEdit.value = null;
   }
   /** 打开人情往来面板：新建（无参）或编辑指定联系人的指定人情 */
   function openFavorPanel(contactId?: string, favorId?: string): void {
     activePanel.value = 'favor';
+    editingId.value = undefined;
     favorEdit.value = { contactId, favorId };
   }
   function closePanel(): void {
@@ -128,22 +132,49 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
     if (!item) return;
     upsertLedger({ ...item, isDanger: !item.isDanger });
   }
-  /** 标记 / 撤销「全部已还」 */
-  function markLedgerSettled(id: string, settled = true): void {
+  /** 标记 / 撤销「全部已还」；标记时可附备注，自动把剩余待还补记为一笔结清还款 */
+  function markLedgerSettled(id: string, settled = true, note?: string): void {
     const item = ledger.value.find((l) => l.id === id);
     if (!item) return;
+    const trimmed = note?.trim();
+    if (settled && trimmed) {
+      const paid = (item.repayments ?? []).reduce((sum, r) => (r.type !== 'borrow' ? sum + r.amount : sum), 0);
+      const rem = Math.max(0, item.amount - paid);
+      const repayments: LedgerRepayment[] = rem > 0
+        ? [...(item.repayments ?? []), { id: db.uid(), date: selectedDate.value, amount: rem, type: 'repay', note: trimmed, createdAt: Date.now() }]
+        : item.repayments ?? [];
+      upsertLedger({ ...item, repayments, isSettled: true });
+      return;
+    }
     upsertLedger({ ...item, isSettled: settled });
   }
-  /** 追加一笔部分还款；累计已还达到总额时自动标记为全部已还 */
-  function addLedgerRepayment(id: string, amount: number, date?: ISODate): void {
+  /** 追加一笔部分还款（type: 'repay'，可带备注）；累计已还达到总额时自动标记为全部已还 */
+  function addLedgerRepayment(id: string, amount: number, note?: string, date?: ISODate): void {
     const item = ledger.value.find((l) => l.id === id);
     if (!item || !Number.isFinite(amount) || amount <= 0) return;
     const record: LedgerRepayment = {
-      id: db.uid(), date: date || selectedDate.value, amount: Math.abs(amount), createdAt: Date.now(),
+      id: db.uid(), date: date || selectedDate.value, amount: Math.abs(amount),
+      type: 'repay', note: note?.trim() || undefined, createdAt: Date.now(),
     };
     const repayments = [...(item.repayments ?? []), record];
-    const paid = repayments.reduce((sum, r) => sum + r.amount, 0);
+    // 已还总额仅累计还款记录，追加借出（type: 'borrow'）不计入
+    const paid = repayments.reduce((sum, r) => (r.type !== 'borrow' ? sum + r.amount : sum), 0);
     upsertLedger({ ...item, repayments, isSettled: paid >= item.amount ? true : item.isSettled });
+  }
+  /** 借款未还清状态下继续追加借出：累加本金并向明细追加一笔 borrow 记录 */
+  function addLedgerBorrow(id: string, amount: number, note?: string, date?: ISODate): void {
+    const item = ledger.value.find((l) => l.id === id);
+    if (!item || !Number.isFinite(amount) || amount <= 0) return;
+    const record: LedgerRepayment = {
+      id: db.uid(), date: date || selectedDate.value, amount: Math.abs(amount),
+      type: 'borrow', note: note?.trim() || undefined, createdAt: Date.now(),
+    };
+    upsertLedger({
+      ...item,
+      amount: item.amount + Math.abs(amount),
+      isSettled: false,
+      repayments: [...(item.repayments ?? []), record],
+    });
   }
 
   /* ---------- 日记 ---------- */
@@ -241,6 +272,15 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
   const historyTags = computed<string[]>(() => db.collectHistoryTags(contacts.value));
   /** 人情往来历史标签去重候选 */
   const historyFavorTags = computed<string[]>(() => db.collectFavorTags(contacts.value));
+  /** 记账历史标签去重候选（记账表单聚焦时弹出，供标签胶囊快选） */
+  const historyLedgerTags = computed<string[]>(() => {
+    const seen = new Set<string>();
+    for (const item of ledger.value) {
+      const t = item.tag?.trim();
+      if (t) seen.add(t);
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+  });
 
   /** 全部人情往来拍平列表（按日期倒序，附带联系人信息，供「全部」模式展示） */
   interface FavorRow {
@@ -270,11 +310,11 @@ export const useCrmStore = defineStore('fishcrm-v2', () => {
     openPanel, openFavorPanel, closePanel,
     upsertContact, removeContact, upsertFavor, removeFavor,
     upsertLedger, removeLedger,
-    toggleLedgerDanger, markLedgerSettled, addLedgerRepayment,
+    toggleLedgerDanger, markLedgerSettled, addLedgerRepayment, addLedgerBorrow,
     upsertDiary, removeDiary, upsertTodo, createTodo, addTodoForDiary,
     toggleTodo, toggleImportant, removeTodo,
     upsertRelation, removeRelation,
     todosForDay, todosOfSelectedDate, diaryOfSelectedDate, todosOfDiary,
-    summaryMap, historyTags, historyFavorTags, allFavors,
+    summaryMap, historyTags, historyFavorTags, historyLedgerTags, allFavors,
   };
 });

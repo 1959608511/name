@@ -35,14 +35,19 @@ export interface ContactPerson {
 /** 记账类别：支出 | 收入 | 其他（专用于借钱/还钱往来） */
 export type LedgerCategory = 'expense' | 'income' | 'other';
 
-/** 记账小模块展示范围：当日 | 全部 | 借还 */
-export type LedgerScope = 'day' | 'all' | 'loan';
+/** 记账小模块展示范围：当日 | 全部 | 借还 | 礼物 */
+export type LedgerScope = 'day' | 'all' | 'loan' | 'gift';
 
-/** 借还账目的单笔部分还款记录 */
+/** 通讯录小模块展示范围：当日 | 全部联系人 | 全部人情往来 */
+export type ContactScope = 'day' | 'contacts' | 'favors';
+
+/** 借还账目的单笔资金往来记录（repay = 部分还款 / borrow = 追加借出） */
 export interface LedgerRepayment {
   id: string;
   date: ISODate;
   amount: number;
+  type?: 'repay' | 'borrow';
+  note?: string;
   createdAt: number;
 }
 
@@ -55,7 +60,16 @@ export interface LedgerItem {
   contactId?: string;
   contactName?: string;
   remark: string;
+  /** 兼容旧数据的临时便签 */
   tempNote?: string;
+  /** 记录时间，格式 'HH:mm' */
+  time?: string;
+  /** 记账标签（支出/收入/借还表单通用） */
+  tag?: string;
+  /** 借还收支方向：'out' 付出 | 'in' 收到 */
+  direction?: 'out' | 'in';
+  /** 借还中填写的礼物/物品名称 */
+  gift?: string;
   createdAt: number;
   /** 借还账目：是否全部已还 */
   isSettled?: boolean;

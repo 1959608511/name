@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 工作台 · 通讯录窗口（人情往来逐条展示 / 当日新建联系人兜底 / 全部切换） */
+/** 工作台 · 通讯录窗口（联系人 / 人情往来 / 当日三态切换，+ 添加智能分流） */
 import { computed } from 'vue';
 import type { ContactPerson, FavorRecord, ISODate } from '../../types/schema';
 import { useCrmStore } from '../../store/useCrmStore';
@@ -20,6 +20,9 @@ interface FavorRow {
   contactName: string;
 }
 
+const isContacts = computed(() => store.contactScope === 'contacts');
+const isFavors = computed(() => store.contactScope === 'favors');
+
 /** 当日人情往来 */
 const dayFavors = computed<FavorRow[]>(() => {
   const rows: FavorRow[] = [];
@@ -33,27 +36,21 @@ const dayFavors = computed<FavorRow[]>(() => {
   return rows;
 });
 
-/** 当前展示的人情列表（全部模式倒序 / 当日模式） */
-const favorRows = computed<FavorRow[]>(() =>
-  store.contactScope === 'all' ? store.allFavors : dayFavors.value,
-);
-
-const isAll = computed(() => store.contactScope === 'all');
+/** 当前展示的人情列表（人情往来模式全量倒序 / 当日模式） */
+const favorRows = computed<FavorRow[]>(() => (isFavors.value ? store.allFavors : dayFavors.value));
 
 /** 当日建档的联系人：即使没有任何人情往来，也必须在通讯录小模块立即可见 */
 const dayContacts = computed<ContactPerson[]>(() =>
   store.contacts.filter((c) => contactDateOf(c) === props.selectedDate),
 );
 
-/** 全部模式兜底：没有任何人情记录的联系人（保证新建联系人 100% 可见） */
-const bareContacts = computed<ContactPerson[]>(() =>
-  store.contacts.filter((c) => !c.favors.length),
-);
-
-const contactRows = computed<ContactPerson[]>(() => (isAll.value ? bareContacts.value : dayContacts.value));
+/** 当前展示的联系人（联系人模式全量 / 当日模式） */
+const contactRows = computed<ContactPerson[]>(() => (isContacts.value ? store.contacts : dayContacts.value));
 const hasAny = computed(() => favorRows.value.length > 0 || contactRows.value.length > 0);
 
 const meta = computed(() => {
+  if (isContacts.value) return contactRows.value.length ? `${contactRows.value.length} 人` : '';
+  if (isFavors.value) return favorRows.value.length ? `${favorRows.value.length} 条` : '';
   const count = favorRows.value.length;
   if (!count && !contactRows.value.length) return '';
   return count ? `${count} 条` : `${contactRows.value.length} 人`;
@@ -62,17 +59,24 @@ const meta = computed(() => {
 function openFavor(row: FavorRow): void {
   store.openFavorPanel(row.contactId, row.favor.id);
 }
-function addFavor(): void {
-  store.openFavorPanel();
-}
 function addFavorFor(contactId: string): void {
   store.openFavorPanel(contactId);
 }
 function editContact(id: string): void {
   emit('edit', id);
 }
-function toggleScope(): void {
-  store.setContactScope(isAll.value ? 'day' : 'all');
+/** 切换「联系人」全量视图：仅显示全部联系人列表，再次点击恢复当日 */
+function toggleContacts(): void {
+  store.setContactScope(isContacts.value ? 'day' : 'contacts');
+}
+/** 切换「人情往来」全量视图：仅显示全部人情往来记录，再次点击恢复当日 */
+function toggleFavors(): void {
+  store.setContactScope(isFavors.value ? 'day' : 'favors');
+}
+/** + 添加：人情往来视图默认新建人情，否则新建联系人 */
+function onAdd(): void {
+  if (isFavors.value) store.openFavorPanel();
+  else emit('create');
 }
 </script>
 
@@ -84,14 +88,19 @@ function toggleScope(): void {
   >
     <!-- 三个紧凑胶囊按钮直接位于标题栏右上角，与「通讯录」同一行靠右对齐 -->
     <template #actions>
-      <button class="cw-btn cw-btn-indigo" type="button" @click="emit('create')">新增/修改联系人</button>
-      <button class="cw-btn cw-btn-amber" type="button" @click="addFavor">人情往来添加</button>
       <button
-        class="cw-btn"
-        :class="{ 'cw-btn-on': isAll }"
+        class="cw-btn cw-btn-indigo"
+        :class="{ 'cw-btn-on': isContacts }"
         type="button"
-        @click="toggleScope"
-      >全部</button>
+        @click="toggleContacts"
+      >联系人</button>
+      <button
+        class="cw-btn cw-btn-amber"
+        :class="{ 'cw-btn-on': isFavors }"
+        type="button"
+        @click="toggleFavors"
+      >人情往来</button>
+      <button class="cw-btn cw-btn-create" type="button" @click="onAdd">+ 添加</button>
     </template>
 
     <template v-if="favorRows.length">
@@ -108,14 +117,14 @@ function toggleScope(): void {
             {{ row.contactName }} · {{ row.favor.title }}
             <span v-if="row.favor.tag" class="cw-tag">{{ row.favor.tag }}</span>
           </span>
-          <span v-if="isAll" class="cw-sub">{{ row.favor.date }}</span>
+          <span v-if="isFavors" class="cw-sub">{{ row.favor.date }}</span>
         </span>
       </button>
     </template>
 
-    <!-- 联系人条目：当日新建必显 / 全部模式为无往来记录者兜底 -->
+    <!-- 联系人条目：当日新建必显 / 联系人模式为全量列表 -->
     <div v-if="contactRows.length" class="cw-contacts">
-      <p class="cw-sect">{{ isAll ? '无往来记录联系人' : '当日新建联系人' }}</p>
+      <p class="cw-sect">{{ isContacts ? '全部联系人' : '当日新建联系人' }}</p>
       <div v-for="c in contactRows" :key="c.id" class="cw-contact">
         <button class="cw-contact-main" type="button" @click="editContact(c.id)">
           <span class="cw-emoji">👤</span>
@@ -135,7 +144,7 @@ function toggleScope(): void {
     </div>
 
     <p v-if="!hasAny" class="cw-empty">
-      {{ isAll ? '还没有任何联系人' : '这天还没有人情往来记录，点右上角「新增/修改联系人」建档' }}
+      {{ isFavors ? '还没有任何人情往来记录，点右上角「+ 添加」记一笔' : isContacts ? '还没有任何联系人，点右上角「+ 添加」建档' : '这天还没有人情往来记录，点右上角「+ 添加」建档' }}
     </p>
   </WorkspaceCard>
 </template>
@@ -146,9 +155,12 @@ function toggleScope(): void {
   border: 1px solid #e2e8f0; background: #f8fafc; color: #64748b;
   font-size: 10px; line-height: 1.4; padding: 3px 6px; border-radius: 999px;
   flex-shrink: 0; white-space: nowrap; -webkit-tap-highlight-color: transparent;
+  transition: all 0.2s ease;
 }
+.cw-btn:active { transform: scale(0.95); }
 .cw-btn-indigo { background: #eef2ff; color: #4f46e5; border-color: #e0e7ff; }
 .cw-btn-amber { background: #fffbeb; color: #d97706; border-color: #fde68a; }
+.cw-btn-create { background: #f8fafc; color: #334155; border-color: #e2e8f0; }
 .cw-btn-on { background: #4f46e5; color: #fff; border-color: #4f46e5; }
 
 .cw-row {

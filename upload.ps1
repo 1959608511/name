@@ -1,4 +1,4 @@
-﻿﻿﻿﻿$ErrorActionPreference = 'Continue'
+﻿﻿﻿$ErrorActionPreference = 'Continue'
 Set-Location -LiteralPath $PSScriptRoot
 
 function Write-Step([string]$Text) { Write-Host $Text -ForegroundColor Cyan }
@@ -6,7 +6,7 @@ function Write-Warn2([string]$Text) { Write-Host $Text -ForegroundColor Yellow }
 function Write-Err2([string]$Text) { Write-Host $Text -ForegroundColor Red }
 
 Write-Host "============================================"
-Write-Host "  name 一键上传 GitHub 工具"
+Write-Host "  FishCRM 一键上传 GitHub 工具"
 Write-Host "============================================"
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -47,40 +47,59 @@ if (-not $gitUser) {
 
 git rm -r --cached node_modules .jdk dist android/.gradle android/app/build 2>$null | Out-Null
 
-$TargetRepo = "https://github.com/1959608511/name.git"
+function Get-NormalizedRepoUrl([string]$value) {
+    if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+    $clean = $value.Trim()
+    $clean = $clean.Trim([char[]]@(96, 34, 39, 60, 62, 32))
+    if ($clean -match 'github\.com[:\/]+([^\/\s]+)\/([^\/\s]+)') {
+        $owner = $Matches[1]
+        $repo = $Matches[2] -replace '\.git$', ''
+        if ($owner -and $repo) { return "https://github.com/$owner/$repo.git" }
+    }
+    return $null
+}
 
 $currentUrl = (git remote get-url origin 2>$null)
-if ($currentUrl -and $currentUrl.Trim() -ne $TargetRepo) {
-    git remote set-url origin $TargetRepo
-} elseif (-not $currentUrl) {
-    git remote add origin $TargetRepo
-}
-Write-Step "准备上传到 GitHub 的 name 仓库"
-
-Write-Step "正在整理本地文件 ..."
-git add -A | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Write-Err2 "整理文件失败，请关闭正在编辑文件的程序后再试。"
-    exit 1
-}
-git branch -M main
-git commit -m "backup: name 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Host
-
-Write-Step "正在上传到 GitHub，请稍候（若弹出登录窗口请完成授权）..."
-
-$pushOk = $false
-$maxAttempts = 3
-for ($i = 1; $i -le $maxAttempts -and -not $pushOk; $i++) {
-    git push -u origin main | Out-Host
-    $pushOk = ($LASTEXITCODE -eq 0)
-    if (-not $pushOk -and $i -lt $maxAttempts) {
-        Write-Warn2 "网络不太稳定，正在自动重试（第 $($i + 1) 次）..."
-        Start-Sleep -Seconds 5
+$remote = $null
+if ($currentUrl) {
+    $remote = Get-NormalizedRepoUrl $currentUrl
+    if ($remote) {
+        if ($remote -ne $currentUrl.Trim()) {
+            Write-Warn2 "[提示] 已自动修正仓库地址为：$remote"
+            git remote set-url origin $remote
+        }
+    } else {
+        Write-Warn2 "[提示] 当前绑定的地址无效：$currentUrl"
     }
 }
 
+if (-not $remote) {
+    $inputUrl = Read-Host "请粘贴 GitHub 仓库地址（例如 https://github.com/xxx/FishCRM.git）"
+    $remote = Get-NormalizedRepoUrl $inputUrl
+    if (-not $remote) {
+        Write-Err2 "[错误] 无法识别仓库地址。请不要粘贴网页里的文件链接（含 /blob/ 或 /tree/），"
+        Write-Err2 "        正确格式：https://github.com/用户名/仓库名.git"
+        exit 1
+    }
+    Write-Step "使用仓库地址：$remote"
+    if ($currentUrl) { git remote set-url origin $remote } else { git remote add origin $remote }
+}
+
+Write-Step "正在扫描并打包源码（已自动过滤 node_modules 与 .jdk）..."
+git add -A | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Err2 "[错误] 暂存文件失败，请检查文件权限。"
+    exit 1
+}
+git branch -M main
+git commit -m "backup: FishCRM 自动同步备份 ($(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))" | Out-Host
+
+Write-Step "正在上传到 GitHub（若弹出登录窗口请完成授权）..."
+git push -u origin main | Out-Host
+$pushOk = ($LASTEXITCODE -eq 0)
+
 if (-not $pushOk) {
-    Write-Warn2 "上传遇到阻碍，正在自动处理..."
+    Write-Warn2 "[提示] 直接推送失败，尝试合并远端已有内容后重试 ..."
     git pull origin main --allow-unrelated-histories --no-edit | Out-Host
     if ($LASTEXITCODE -eq 0) {
         git push -u origin main | Out-Host
@@ -89,54 +108,24 @@ if (-not $pushOk) {
 }
 
 if (-not $pushOk) {
-    Write-Warn2 "远端仓库里有和本地不一样的内容，无法自动合并。"
-    $answer = Read-Host "是否用本地文件覆盖远端（会删掉远端旧内容）？输入 y 确认"
+    Write-Warn2 "[提示] 自动合并未成功，远端仓库可能已有同名文件。"
+    $answer = Read-Host "是否用本地源码覆盖远端内容（强制推送，会删除远端历史）？输入 y 确认"
     if ($answer -eq 'y') {
         git push --force origin main | Out-Host
         $pushOk = ($LASTEXITCODE -eq 0)
     }
 }
 
-if (-not $pushOk) {
+if ($pushOk) {
     Write-Host ""
-    Write-Err2 "上传失败，请检查网络后重新双击本脚本。"
-    Write-Host "如果多次都失败，可能是没有登录 GitHub 或网络无法访问 GitHub。"
-    exit 1
-}
-
-# ---------- 上传完整性校验 ----------
-Write-Host ""
-Write-Step "上传完成，正在校验文件是否全部传成功 ..."
-
-$localHash = (git rev-parse HEAD).Trim()
-
-$remoteInfo = git ls-remote origin main 2>$null
-if (-not $remoteInfo) {
-    Write-Err2 "校验失败：连不上 GitHub，请检查网络后重新双击本脚本。"
-    exit 1
-}
-$remoteHash = ($remoteInfo -split '\s+')[0].Trim()
-
-if ($remoteHash -ne $localHash) {
-    Write-Err2 "校验失败：远端和本地内容不一致，可能网络波动没传完整。"
-    Write-Host "请重新双击本脚本再传一次。"
-    exit 1
-}
-
-# 提交哈希一致后，再逐文件比对文件清单（双保险）
-git fetch origin main | Out-Host
-$localFiles  = @(git ls-files)
-$remoteFiles = @(git ls-tree -r origin/main --name-only)
-
-$missing = @($localFiles | Where-Object { $remoteFiles -notcontains $_ })
-$extra   = @($remoteFiles | Where-Object { $localFiles -notcontains $_ })
-
-if ($missing.Count -eq 0 -and $extra.Count -eq 0) {
-    Write-Host ""
-    Write-Host "校验完成，全部 $($localFiles.Count) 个文件已成功上传到 GitHub，一个不缺。" -ForegroundColor Green
+    Write-Host "[完成] 已成功上传到 GitHub" -ForegroundColor Green
     exit 0
 }
 
-Write-Err2 "校验失败：远端文件和本地对不上，可能网络波动没传完整。"
-Write-Host "请重新双击本脚本再传一次。"
+Write-Host ""
+Write-Err2 "[失败] 上传未完成，常见原因："
+Write-Host "  1. 未登录 GitHub 或授权被取消"
+Write-Host "  2. 仓库地址错误，或该账号没有写入权限"
+Write-Host "  3. 远端存在冲突内容，需要先手动执行 git pull"
+Write-Host "请把上方报错信息发给开发者。"
 exit 1
